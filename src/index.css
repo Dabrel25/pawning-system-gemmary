@@ -1,0 +1,198 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Poppins:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Brand Colors */
+    --brand-red: 1 50% 50%;
+    --brand-red-hover: 1 50% 42%;
+    --brand-gold: 47 91% 58%;
+    --brand-burgundy: 350 55% 35%;
+    --rose-gold: 350 35% 60%;
+    
+    /* Neutral Colors */
+    --background: 40 20% 98%;
+    --foreground: 20 10% 10%;
+    --surface: 0 0% 100%;
+    
+    /* Card */
+    --card: 0 0% 100%;
+    --card-foreground: 20 10% 10%;
+    
+    /* Popover */
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 10% 10%;
+    
+    /* Primary = Brand Red */
+    --primary: 1 50% 50%;
+    --primary-foreground: 0 0% 100%;
+    
+    /* Secondary */
+    --secondary: 40 20% 96%;
+    --secondary-foreground: 20 10% 10%;
+    
+    /* Muted */
+    --muted: 40 10% 94%;
+    --muted-foreground: 30 5% 40%;
+    
+    /* Accent = Brand Gold */
+    --accent: 47 91% 58%;
+    --accent-foreground: 350 55% 25%;
+    
+    /* Semantic Colors */
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+    --error: 0 72% 51%;
+    --error-foreground: 0 0% 100%;
+    --info: 217 91% 60%;
+    --info-foreground: 0 0% 100%;
+    
+    /* Destructive */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    
+    /* Border & Input */
+    --border: 40 10% 90%;
+    --input: 40 10% 90%;
+    --ring: 1 50% 50%;
+    
+    /* Radius */
+    --radius: 0.5rem;
+    
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 30 5% 30%;
+    --sidebar-primary: 1 50% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 47 91% 95%;
+    --sidebar-accent-foreground: 350 55% 25%;
+    --sidebar-border: 40 10% 92%;
+    --sidebar-ring: 1 50% 50%;
+    
+    /* Text */
+    --text-primary: 20 10% 10%;
+    --text-secondary: 30 5% 35%;
+    --text-tertiary: 30 5% 60%;
+  }
+
+  .dark {
+    --background: 20 10% 8%;
+    --foreground: 40 20% 98%;
+    --surface: 20 10% 12%;
+    
+    --card: 20 10% 12%;
+    --card-foreground: 40 20% 98%;
+    
+    --popover: 20 10% 12%;
+    --popover-foreground: 40 20% 98%;
+    
+    --primary: 1 50% 55%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 20 10% 18%;
+    --secondary-foreground: 40 20% 98%;
+    
+    --muted: 20 10% 20%;
+    --muted-foreground: 30 5% 65%;
+    
+    --accent: 47 91% 50%;
+    --accent-foreground: 20 10% 10%;
+    
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --border: 20 10% 20%;
+    --input: 20 10% 20%;
+    --ring: 1 50% 55%;
+    
+    --sidebar-background: 20 10% 10%;
+    --sidebar-foreground: 40 20% 90%;
+    --sidebar-primary: 1 50% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 20 10% 18%;
+    --sidebar-accent-foreground: 40 20% 98%;
+    --sidebar-border: 20 10% 18%;
+    --sidebar-ring: 1 50% 55%;
+    
+    --text-primary: 40 20% 98%;
+    --text-secondary: 30 5% 70%;
+    --text-tertiary: 30 5% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+}
+
+@layer components {
+  /* Premium gold gradient */
+  .gradient-gold {
+    @apply bg-gradient-to-r from-brand-gold to-yellow-400;
+  }
+  
+  /* Card with gold left border accent */
+  .card-accent {
+    @apply border-l-4 border-l-brand-gold;
+  }
+  
+  /* Photo capture zone */
+  .photo-capture-zone {
+    @apply border-2 border-dashed border-brand-gold rounded-lg bg-muted/50 
+           hover:bg-background hover:border-solid hover:shadow-md transition-all duration-200;
+  }
+  
+  /* Status dot */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+  
+  .status-dot-active {
+    @apply bg-success;
+  }
+  
+  .status-dot-warning {
+    @apply bg-warning;
+  }
+  
+  .status-dot-error {
+    @apply bg-error;
+  }
+  
+  /* Loan percentage bar */
+  .loan-percentage-bar {
+    @apply h-2 rounded-full bg-border overflow-hidden;
+  }
+  
+  .loan-percentage-fill {
+    @apply h-full transition-all duration-300;
+  }
+}
+
+@layer utilities {
+  .font-heading {
+    font-family: 'Poppins', sans-serif;
+  }
+  
+  .font-body {
+    font-family: 'Inter', sans-serif;
+  }
+  
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
