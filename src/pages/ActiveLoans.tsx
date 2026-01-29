@@ -9,7 +9,6 @@ import { Card, CardContent } from "@/components/ui/card.tsx";
 import { AvatarCustom } from "@/components/ui/avatar-custom.tsx";
 import { LoanStatusBadge } from "@/components/ui/status-badge.tsx";
 import { getActiveLoans, deleteLoan, type Loan } from "@/services/loan-service";
-import { mockLoans } from "@/data/mock-data.ts";
 import { toast } from "sonner";
 import {
   Select,
@@ -19,45 +18,11 @@ import {
   SelectValue,
 } from "@/components/ui/select.tsx";
 
-// Convert mock loans to the Supabase format
-const convertedMockLoans: (Loan & { daysUntilDue: number; isMock: boolean })[] = mockLoans.map(loan => ({
-  id: `mock-${loan.id}`,
-  ticket_number: loan.ticketNumber,
-  customer_id: loan.customerId,
-  status: 'active' as const,
-  item_category: loan.item.category,
-  item_description: loan.item.description,
-  appraisal_value: loan.item.appraisalValue,
-  gold_type: loan.item.goldType,
-  gold_weight: loan.item.weight,
-  gold_karat: loan.item.karat,
-  brand: loan.item.brand,
-  model: loan.item.model,
-  serial_number: loan.item.serialNumber,
-  item_condition: loan.item.condition,
-  principal: loan.principal,
-  interest_rate: loan.interestRate,
-  period_days: loan.loanPeriodDays,
-  service_fee: loan.serviceFee,
-  interest_amount: loan.totalDue - loan.principal - loan.serviceFee,
-  total_due: loan.totalDue,
-  maturity_date: loan.maturityDate,
-  created_at: loan.createdAt,
-  customer: {
-    id: loan.customer.id,
-    full_name: loan.customer.fullName,
-    phone: loan.customer.phone,
-    photo: loan.customer.photo,
-  },
-  daysUntilDue: loan.daysUntilDue,
-  isMock: true,
-}));
-
 export default function ActiveLoans() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [supabaseLoans, setSupabaseLoans] = useState<Loan[]>([]);
+  const [loans, setLoans] = useState<Loan[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -67,7 +32,7 @@ export default function ActiveLoans() {
     if (isRefresh) setIsRefreshing(true);
     try {
       const data = await getActiveLoans();
-      setSupabaseLoans(data);
+      setLoans(data);
     } catch (error) {
       console.error('Error fetching loans:', error);
     } finally {
@@ -84,12 +49,7 @@ export default function ActiveLoans() {
     fetchLoans(true);
   };
 
-  const handleDelete = async (loanId: string, isMock: boolean) => {
-    if (isMock) {
-      toast.error("Cannot delete demo data");
-      return;
-    }
-
+  const handleDelete = async (loanId: string) => {
     if (!confirm("Are you sure you want to delete this loan?")) {
       return;
     }
@@ -107,17 +67,14 @@ export default function ActiveLoans() {
     }
   };
 
-  // Combine Supabase loans with mock loans
-  const supabaseLoansWithDays = supabaseLoans.map(loan => ({
+  // Calculate days until due for each loan
+  const loansWithDays = loans.map(loan => ({
     ...loan,
     daysUntilDue: differenceInDays(new Date(loan.maturity_date), new Date()),
-    isMock: false,
   }));
 
-  const allLoans = [...supabaseLoansWithDays, ...convertedMockLoans];
-
   // Filter loans
-  const filteredLoans = allLoans.filter((loan) => {
+  const filteredLoans = loansWithDays.filter((loan) => {
     const matchesSearch =
       loan.ticket_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (loan.customer?.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -229,11 +186,6 @@ export default function ActiveLoans() {
                     <div>
                       <p className="font-heading font-semibold text-lg text-text-primary">
                         {loan.customer?.full_name || 'Unknown Customer'}
-                        {loan.isMock && (
-                          <span className="ml-2 text-xs bg-muted text-text-tertiary px-2 py-0.5 rounded">
-                            Demo
-                          </span>
-                        )}
                       </p>
                       <p className="text-text-tertiary text-sm">
                         Ticket: <span className="font-mono">{loan.ticket_number}</span>
@@ -309,7 +261,7 @@ export default function ActiveLoans() {
                     disabled={deletingId === loan.id}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(loan.id!, loan.isMock);
+                      handleDelete(loan.id!);
                     }}
                   >
                     {deletingId === loan.id ? (
