@@ -49,7 +49,7 @@ export default function Dashboard() {
               {greeting()}, Juan
             </h1>
             <p className="text-text-secondary mt-1">
-              {format(new Date(), "EEEE, MMMM d, yyyy")} • Branch: Main Office
+              {format(new Date(), "EEEE, MMMM d, yyyy")} • Branch: Bogo City
             </p>
           </div>
           <Link to="/loans/new">
