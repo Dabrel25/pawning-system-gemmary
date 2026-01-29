@@ -87,7 +87,7 @@ export function Sidebar() {
             <p className="text-sm font-medium text-text-primary truncate">
               Juan Staff
             </p>
-            <p className="text-xs text-text-tertiary truncate">Main Branch</p>
+            <p className="text-xs text-text-tertiary truncate">J. Almirante corner R. Fernan St., Bogo City</p>
           </div>
           <button className="p-2 text-text-tertiary hover:text-primary transition-colors">
             <LogOut className="w-4 h-4" />

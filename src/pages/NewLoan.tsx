@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
   Search, 
@@ -33,8 +33,9 @@ import { StepIndicator } from "@/components/ui/step-indicator.tsx";
 import { CategoryCard } from "@/components/ui/category-card.tsx";
 import { PhotoCapture } from "@/components/ui/photo-capture.tsx";
 import { InfoRow } from "@/components/ui/info-row.tsx";
-import { mockCustomers } from "@/data/mock-data.ts";
 import { useLoanFormStore } from "@/stores/loan-form-store.ts";
+import { searchCustomers as searchCustomersApi, createCustomer, type Customer } from "@/services/customer-service";
+import { createLoan } from "@/services/loan-service";
 import gemmaryLogo from "@/assets/gemmary_logo.jpg";
 import {
   Select,
@@ -67,22 +68,36 @@ export default function NewLoan() {
   const { step, setStep, customerData, setCustomerData, itemData, setItemData, loanTerms, setLoanTerms, reset } = useLoanFormStore();
   
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState<typeof mockCustomers[0] | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [photos, setPhotos] = useState<Record<string, string>>({});
   const [itemPhotos, setItemPhotos] = useState<string[]>([]);
   const [category, setCategory] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [searchResults, setSearchResults] = useState<Customer[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
-  // Search customers
-  const searchResults = useMemo(() => {
-    if (!searchQuery || searchQuery.length < 2) return [];
-    return mockCustomers.filter(
-      (c) =>
-        c.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.phone.includes(searchQuery) ||
-        c.idNumber.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+  // Search customers from Supabase
+  useEffect(() => {
+    const search = async () => {
+      if (!searchQuery || searchQuery.length < 2) {
+        setSearchResults([]);
+        return;
+      }
+      setIsSearching(true);
+      try {
+        const results = await searchCustomersApi(searchQuery);
+        setSearchResults(results);
+      } catch (error) {
+        console.error('Search error:', error);
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    };
+
+    const debounce = setTimeout(search, 300);
+    return () => clearTimeout(debounce);
   }, [searchQuery]);
 
   // Calculate loan values
@@ -130,22 +145,122 @@ export default function NewLoan() {
     setItemPhotos((prev) => [...prev, url]);
   };
 
-  const selectCustomer = (customer: typeof mockCustomers[0]) => {
+  const selectCustomer = (customer: Customer) => {
     setSelectedCustomer(customer);
-    setCustomerData(customer);
+    setCustomerData({
+      fullName: customer.full_name,
+      dateOfBirth: customer.date_of_birth,
+      phone: customer.phone,
+      email: customer.email,
+      address: customer.address,
+      idType: customer.id_type,
+      idNumber: customer.id_number,
+    });
     setStep(2);
+  };
+
+  // Validation functions
+  const isCustomerValid = () => {
+    return !!(
+      customerData.fullName &&
+      customerData.dateOfBirth &&
+      customerData.phone &&
+      customerData.idType &&
+      customerData.idNumber &&
+      customerData.address &&
+      photos["customer-photo"] &&
+      photos["id-front"] &&
+      photos["id-back"]
+    );
+  };
+
+  const isItemValid = () => {
+    const hasCategory = !!category;
+    const hasPhotos = itemPhotos.length >= 2;
+    const hasAppraisal = appraisalValue > 0;
+
+    if (category === "gold") {
+      return hasCategory && hasPhotos && hasAppraisal &&
+        !!(itemData.goldType && itemData.weight && itemData.karat);
+    }
+    if (category === "electronics" || category === "mobile") {
+      return hasCategory && hasPhotos && hasAppraisal &&
+        !!(itemData.brand && itemData.model && itemData.condition);
+    }
+    return hasCategory && hasPhotos && hasAppraisal;
+  };
+
+  const isLoanTermsValid = () => {
+    return principal > 0 && interestRate > 0 && period > 0;
   };
 
   const handleConfirmAndPrint = async () => {
     setIsProcessing(true);
-    // Simulate processing
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setIsProcessing(false);
-    toast.success("Loan created successfully!", {
-      description: `Ticket #${ticketNumber} has been generated`,
-    });
-    reset();
-    navigate("/loans");
+    try {
+      let customerId = selectedCustomer?.id;
+
+      // If new customer, save to Supabase first
+      if (isNewCustomer && !selectedCustomer) {
+        const newCustomer = await createCustomer({
+          full_name: customerData.fullName || '',
+          date_of_birth: customerData.dateOfBirth || '',
+          phone: customerData.phone || '',
+          email: customerData.email || undefined,
+          address: customerData.address || '',
+          id_type: customerData.idType || '',
+          id_number: customerData.idNumber || '',
+          photo: photos["customer-photo"] || undefined,
+          id_front_photo: photos["id-front"] || undefined,
+          id_back_photo: photos["id-back"] || undefined,
+          watchlist_status: 'clear',
+        });
+        customerId = newCustomer.id;
+      }
+
+      if (!customerId) {
+        throw new Error('No customer selected');
+      }
+
+      // Create the loan
+      await createLoan({
+        ticket_number: ticketNumber,
+        customer_id: customerId,
+        status: 'active',
+        item_category: category,
+        item_description: category === 'gold'
+          ? `${itemData.goldType} - ${itemData.weight}g ${itemData.karat}`
+          : `${itemData.brand} ${itemData.model}`,
+        item_photos: itemPhotos,
+        appraisal_value: appraisalValue,
+        gold_type: itemData.goldType,
+        gold_weight: itemData.weight,
+        gold_karat: itemData.karat,
+        brand: itemData.brand,
+        model: itemData.model,
+        serial_number: itemData.serialNumber,
+        item_condition: itemData.condition,
+        principal: principal,
+        interest_rate: interestRate,
+        period_days: period,
+        service_fee: serviceFee,
+        interest_amount: interest,
+        total_due: totalDue,
+        maturity_date: maturityDate.toISOString(),
+      });
+
+      toast.success("Loan created successfully!", {
+        description: `Ticket #${ticketNumber} has been generated`,
+      });
+      reset();
+      navigate("/loans");
+    } catch (error) {
+      console.error('Error creating loan:', error);
+      toast.error("Failed to create loan", {
+        description: error instanceof Error ? error.message : "Please try again",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -191,7 +306,13 @@ export default function NewLoan() {
               </div>
 
               {/* Search Results */}
-              {searchResults.length > 0 && (
+              {isSearching && (
+                <div className="text-center py-8">
+                  <Loader2 className="w-8 h-8 text-primary mx-auto animate-spin" />
+                  <p className="text-text-secondary mt-2">Searching...</p>
+                </div>
+              )}
+              {!isSearching && searchResults.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm text-text-tertiary">{searchResults.length} customers found</p>
                   <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -203,14 +324,14 @@ export default function NewLoan() {
                       >
                         <AvatarCustom src={customer.photo} size="md" />
                         <div className="flex-1">
-                          <p className="font-body font-semibold text-text-primary">{customer.fullName}</p>
+                          <p className="font-body font-semibold text-text-primary">{customer.full_name}</p>
                           <p className="text-sm text-text-secondary">{customer.phone}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-sm text-text-tertiary">Active Loans</p>
-                          <p className="font-semibold text-primary">{customer.activeLoansCount}</p>
+                          <p className="font-semibold text-primary">{customer.active_loans_count || 0}</p>
                         </div>
-                        {customer.watchlistStatus === "flagged" && (
+                        {customer.watchlist_status === "flagged" && (
                           <StatusBadge variant="warning">
                             <AlertTriangle className="w-3 h-3" />
                             Review
@@ -223,7 +344,7 @@ export default function NewLoan() {
               )}
 
               {/* No Results */}
-              {searchQuery.length >= 2 && searchResults.length === 0 && (
+              {!isSearching && searchQuery.length >= 2 && searchResults.length === 0 && (
                 <div className="text-center py-8 space-y-4">
                   <UserX className="w-12 h-12 text-text-tertiary mx-auto" />
                   <div>
@@ -370,7 +491,17 @@ export default function NewLoan() {
                   <ChevronLeft className="w-5 h-5 mr-2" />
                   Back to Search
                 </Button>
-                <Button onClick={() => setStep(2)}>
+                <Button
+                  onClick={() => {
+                    if (!isCustomerValid()) {
+                      toast.error("Please complete all required fields", {
+                        description: "Fill in all customer details and capture all photos",
+                      });
+                      return;
+                    }
+                    setStep(2);
+                  }}
+                >
                   Continue to Item Details
                   <ChevronRight className="w-5 h-5 ml-2" />
                 </Button>
@@ -601,7 +732,18 @@ export default function NewLoan() {
                   <ChevronLeft className="w-5 h-5 mr-2" />
                   Back
                 </Button>
-                <Button onClick={() => { setItemData({ category: category as any }); setStep(3); }}>
+                <Button
+                  onClick={() => {
+                    if (!isItemValid()) {
+                      toast.error("Please complete all required fields", {
+                        description: "Select category, add at least 2 photos, fill item details, and set appraisal value",
+                      });
+                      return;
+                    }
+                    setItemData({ category: category as any });
+                    setStep(3);
+                  }}
+                >
                   Continue to Loan Terms
                   <ChevronRight className="w-5 h-5 ml-2" />
                 </Button>
@@ -784,7 +926,17 @@ export default function NewLoan() {
                   <ChevronLeft className="w-5 h-5 mr-2" />
                   Back
                 </Button>
-                <Button onClick={() => setStep(4)}>
+                <Button
+                  onClick={() => {
+                    if (!isLoanTermsValid()) {
+                      toast.error("Please complete loan terms", {
+                        description: "Set a loan amount greater than 0",
+                      });
+                      return;
+                    }
+                    setStep(4);
+                  }}
+                >
                   Review & Generate Ticket
                   <ChevronRight className="w-5 h-5 ml-2" />
                 </Button>
@@ -821,10 +973,10 @@ export default function NewLoan() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-1">
-                  <InfoRow label="Name" value={selectedCustomer?.fullName || customerData.fullName || "N/A"} />
+                  <InfoRow label="Name" value={selectedCustomer?.full_name || customerData.fullName || "N/A"} />
                   <InfoRow label="Phone" value={selectedCustomer?.phone || customerData.phone || "N/A"} />
-                  <InfoRow label="ID Type" value={selectedCustomer?.idType || customerData.idType || "N/A"} />
-                  <InfoRow label="ID Number" value={selectedCustomer?.idNumber || customerData.idNumber || "N/A"} />
+                  <InfoRow label="ID Type" value={selectedCustomer?.id_type || customerData.idType || "N/A"} />
+                  <InfoRow label="ID Number" value={selectedCustomer?.id_number || customerData.idNumber || "N/A"} />
                 </CardContent>
               </Card>
 
@@ -912,7 +1064,7 @@ export default function NewLoan() {
                   <div className="text-center mb-6">
                     <img src={gemmaryLogo} alt="Gemmary" className="h-16 w-16 mx-auto mb-2 rounded-full" />
                     <h4 className="font-heading font-bold text-xl">PAWN TICKET</h4>
-                    <p className="text-sm text-text-tertiary">Main Branch</p>
+                    <p className="text-xs text-text-tertiary">J. Almirante corner R. Fernan St., Bogo City</p>
                   </div>
 
                   <div className="space-y-2 mb-6 text-sm">
@@ -926,7 +1078,7 @@ export default function NewLoan() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-text-tertiary">Customer:</span>
-                      <span className="font-semibold">{selectedCustomer?.fullName || customerData.fullName}</span>
+                      <span className="font-semibold">{selectedCustomer?.full_name || customerData.fullName}</span>
                     </div>
                   </div>
 
