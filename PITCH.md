@@ -1,25 +1,5 @@
 # Gemmary - Pawning System POC
 
-## The Problem
-
-Traditional pawnshops operate on paper tickets, manual calculations, and scattered records. This leads to:
-
-- **Calculation errors** on interest and gold valuations
-- **Lost tickets** and disputed transactions
-- **No visibility** into daily cash flow or outstanding capital
-- **Compliance gaps** with incomplete customer records
-- **Slow redemptions** searching through physical files
-
----
-
-## The Solution
-
-**Gemmary** is a modern, digital pawnshop management system designed specifically for jewelry and pawn operators.
-
-One platform to handle the entire pawn lifecycle—from customer onboarding to loan creation, redemption, and reporting.
-
----
-
 ## What This POC Demonstrates
 
 ### 1. Smart Loan Creation
