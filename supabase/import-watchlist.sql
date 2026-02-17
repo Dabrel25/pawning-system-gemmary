@@ -1,0 +1,28 @@
+-- ============================================================
+-- IMPORT UNSC WATCHLIST FROM CSV
+-- ============================================================
+--
+-- Option 1: Use Supabase Dashboard
+-- 1. Go to Table Editor → watchlist_unsc
+-- 2. Click "Insert" → "Import data from CSV"
+-- 3. Upload watchlist_keyfields.csv
+--
+-- Option 2: Use this SQL after uploading CSV to Supabase Storage
+-- (Replace YOUR_BUCKET with actual bucket name)
+--
+-- COPY watchlist_unsc (
+--     record_id, primary_name, alias_1, alias_2, alias_3, alias_4, alias_5,
+--     alias_6, alias_7, alias_8, alias_9, alias_10, dob, pob, nationality,
+--     passport_no, national_id, title, designation, address, listed_on,
+--     other_information, interpol_un_link, name_parts_raw, full_record_raw
+-- )
+-- FROM 's3://YOUR_BUCKET/watchlist_keyfields.csv'
+-- WITH (FORMAT csv, HEADER true);
+
+-- ============================================================
+-- VERIFICATION QUERY
+-- ============================================================
+-- Run this after import to verify:
+--
+-- SELECT COUNT(*) as total_records FROM watchlist_unsc;
+-- SELECT record_id, primary_name, nationality FROM watchlist_unsc LIMIT 10;

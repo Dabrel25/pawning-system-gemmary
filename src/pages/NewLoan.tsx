@@ -35,7 +35,10 @@ import { PhotoCapture } from "@/components/ui/photo-capture.tsx";
 import { InfoRow } from "@/components/ui/info-row.tsx";
 import { useLoanFormStore } from "@/stores/loan-form-store.ts";
 import { searchCustomers as searchCustomersApi, createCustomer, type Customer } from "@/services/customer-service";
-import { createLoan } from "@/services/loan-service";
+import { createLoan, createItem } from "@/services/loan-service";
+import { createNewLoanTransaction } from "@/services/transaction-service";
+import { getDefaultBranch } from "@/services/branch-service";
+import { ScreeningStep } from "@/components/loan/ScreeningStep";
 import gemmaryLogo from "@/assets/gemmary_logo.jpg";
 import {
   Select,
@@ -49,9 +52,10 @@ import { toast } from "sonner";
 
 const steps = [
   { number: 1, label: "Customer" },
-  { number: 2, label: "Item Details" },
-  { number: 3, label: "Loan Terms" },
-  { number: 4, label: "Review & Print" },
+  { number: 2, label: "Screening" },
+  { number: 3, label: "Item Details" },
+  { number: 4, label: "Loan Terms" },
+  { number: 5, label: "Review & Print" },
 ];
 
 const karatPurity: Record<string, number> = {
@@ -76,6 +80,11 @@ export default function NewLoan() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchResults, setSearchResults] = useState<Customer[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [screeningResults, setScreeningResults] = useState<{
+    watchlistResult: { status: string; details?: string };
+    pepResult: { status: string; details?: string };
+    adverseMediaResult: { status: string; details?: string };
+  } | null>(null);
 
   // Search customers from Supabase
   useEffect(() => {
@@ -156,6 +165,7 @@ export default function NewLoan() {
       idType: customer.id_type,
       idNumber: customer.id_number,
     });
+    // Go to screening step for all customers
     setStep(2);
   };
 
@@ -197,7 +207,14 @@ export default function NewLoan() {
   const handleConfirmAndPrint = async () => {
     setIsProcessing(true);
     try {
-      let customerId = selectedCustomer?.id;
+      // Get default branch
+      const defaultBranch = await getDefaultBranch();
+      if (!defaultBranch) {
+        throw new Error('No branch configured. Please run the database migration first.');
+      }
+      const branchKey = defaultBranch.branch_key;
+
+      let customerKey = selectedCustomer?.customer_key;
 
       // If new customer, save to Supabase first
       if (isNewCustomer && !selectedCustomer) {
@@ -214,42 +231,69 @@ export default function NewLoan() {
           id_back_photo: photos["id-back"] || undefined,
           watchlist_status: 'clear',
         });
-        customerId = newCustomer.id;
+        customerKey = newCustomer.customer_key;
       }
 
-      if (!customerId) {
+      if (!customerKey) {
         throw new Error('No customer selected');
       }
 
-      // Create the loan
-      await createLoan({
-        ticket_number: ticketNumber,
-        customer_id: customerId,
-        status: 'active',
-        item_category: category,
-        item_description: category === 'gold'
+      // 1. Create the item in dim_item
+      const karatPurityMap: Record<string, number> = {
+        "10k": 41.7, "14k": 58.3, "18k": 75, "21k": 87.5, "22k": 91.7, "24k": 99.9,
+      };
+
+      const newItem = await createItem({
+        branch_key: branchKey,
+        category: category,
+        subcategory: category === 'gold' ? itemData.goldType : undefined,
+        description: category === 'gold'
           ? `${itemData.goldType} - ${itemData.weight}g ${itemData.karat}`
           : `${itemData.brand} ${itemData.model}`,
-        item_photos: itemPhotos,
-        appraisal_value: appraisalValue,
+        photos: itemPhotos,
         gold_type: itemData.goldType,
-        gold_weight: itemData.weight,
-        gold_karat: itemData.karat,
+        karat: itemData.karat,
+        weight_grams: itemData.weight,
+        purity_percentage: itemData.karat ? karatPurityMap[itemData.karat] : undefined,
+        gold_price_per_gram: itemData.pricePerGram,
         brand: itemData.brand,
         model: itemData.model,
         serial_number: itemData.serialNumber,
         item_condition: itemData.condition,
+        appraisal_value: appraisalValue,
+      });
+
+      // 2. Create the loan in dim_loan
+      const newLoan = await createLoan({
+        customer_key: customerKey,
+        item_key: newItem.item_key,
+        branch_key: branchKey,
         principal: principal,
         interest_rate: interestRate,
-        period_days: period,
+        term_days: period,
         service_fee: serviceFee,
         interest_amount: interest,
         total_due: totalDue,
-        maturity_date: maturityDate.toISOString(),
+        maturity_date: maturityDate.toISOString().slice(0, 10),
+        purpose_of_loan: customerData.purposeOfLoan,
+        transacted_by: customerData.transactedBy,
+        relationship_to_customer: customerData.relationshipToCustomer,
+      });
+
+      // 3. Create transaction record in fact_transactions
+      await createNewLoanTransaction({
+        customerKey: customerKey,
+        loanKey: newLoan.loan_key,
+        itemKey: newItem.item_key,
+        branchKey: branchKey,
+        principal: principal,
+        serviceFee: serviceFee,
+        paymentMethod: 'cash',
+        notes: `New loan created - Ticket: ${newLoan.loan_id}`,
       });
 
       toast.success("Loan created successfully!", {
-        description: `Ticket #${ticketNumber} has been generated`,
+        description: `Ticket #${newLoan.loan_id} has been generated`,
       });
       reset();
       navigate("/loans");
@@ -477,11 +521,224 @@ export default function NewLoan() {
                 />
               </FormField>
 
-              {/* Watchlist Status */}
-              <div className="bg-muted border border-border rounded-lg p-4">
+              {/* Customer Profile Section */}
+              <div className="border-t border-border pt-6">
+                <h3 className="text-lg font-heading font-semibold text-text-primary mb-4">Customer Profile</h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField label="Gender">
+                  <Select
+                    value={customerData.gender}
+                    onValueChange={(value) => setCustomerData({ gender: value as any })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select gender" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+
+                <FormField label="Occupation" required>
+                  <Select
+                    value={customerData.occupation}
+                    onValueChange={(value) => setCustomerData({ occupation: value as any })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select occupation" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="employed">Employed</SelectItem>
+                      <SelectItem value="self_employed">Self-Employed</SelectItem>
+                      <SelectItem value="unemployed">Unemployed</SelectItem>
+                      <SelectItem value="student">Student</SelectItem>
+                      <SelectItem value="retired">Retired</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+
+                <FormField label="Employer / Business Name">
+                  <Input
+                    placeholder="Company or business name"
+                    value={customerData.employerBusinessName || ""}
+                    onChange={(e) => setCustomerData({ employerBusinessName: e.target.value })}
+                  />
+                </FormField>
+
+                <FormField label="Nature of Work">
+                  <Input
+                    placeholder="e.g., Office worker, Driver, Vendor"
+                    value={customerData.natureOfWork || ""}
+                    onChange={(e) => setCustomerData({ natureOfWork: e.target.value })}
+                  />
+                </FormField>
+
+                <FormField label="Monthly Income Range" required>
+                  <Select
+                    value={customerData.monthlyIncomeRange}
+                    onValueChange={(value) => setCustomerData({ monthlyIncomeRange: value as any })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select income range" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="<10k">Below ₱10,000</SelectItem>
+                      <SelectItem value="10k-30k">₱10,000 - ₱30,000</SelectItem>
+                      <SelectItem value="30k-50k">₱30,000 - ₱50,000</SelectItem>
+                      <SelectItem value="50k-100k">₱50,000 - ₱100,000</SelectItem>
+                      <SelectItem value=">100k">Above ₱100,000</SelectItem>
+                      <SelectItem value="undisclosed">Undisclosed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+
+                <FormField label="Source of Income" required>
+                  <Select
+                    value={customerData.sourceOfIncome}
+                    onValueChange={(value) => setCustomerData({ sourceOfIncome: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Employment">Employment</SelectItem>
+                      <SelectItem value="Business">Business</SelectItem>
+                      <SelectItem value="Remittance">Remittance</SelectItem>
+                      <SelectItem value="Inheritance">Inheritance</SelectItem>
+                      <SelectItem value="Pension">Pension</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+              </div>
+
+              {/* PEP Status */}
+              <div className="bg-muted border border-border rounded-lg p-4 space-y-3">
+                <FormField label="Is customer a Politically Exposed Person (PEP)?">
+                  <Select
+                    value={customerData.isPep ? "yes" : "no"}
+                    onValueChange={(value) => setCustomerData({ isPep: value === "yes" })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="no">No</SelectItem>
+                      <SelectItem value="yes">Yes</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+                {customerData.isPep && (
+                  <FormField label="PEP Details" required>
+                    <Input
+                      placeholder="Position or relationship to PEP"
+                      value={customerData.pepDetails || ""}
+                      onChange={(e) => setCustomerData({ pepDetails: e.target.value })}
+                    />
+                  </FormField>
+                )}
+              </div>
+
+              {/* Transaction Information Section */}
+              <div className="border-t border-border pt-6">
+                <h3 className="text-lg font-heading font-semibold text-text-primary mb-4">Transaction Information</h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField label="Purpose of Loan" required>
+                  <Select
+                    value={customerData.purposeOfLoan}
+                    onValueChange={(value) => setCustomerData({ purposeOfLoan: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select purpose" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Personal use">Personal use</SelectItem>
+                      <SelectItem value="Medical emergency">Medical emergency</SelectItem>
+                      <SelectItem value="Business capital">Business capital</SelectItem>
+                      <SelectItem value="Education">Education</SelectItem>
+                      <SelectItem value="Home improvement">Home improvement</SelectItem>
+                      <SelectItem value="Debt consolidation">Debt consolidation</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+
+                <FormField label="Expected Transaction Frequency">
+                  <Select
+                    value={customerData.expectedTransactionFrequency}
+                    onValueChange={(value) => setCustomerData({ expectedTransactionFrequency: value as any })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select frequency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="first_time">First time</SelectItem>
+                      <SelectItem value="occasional">Occasional (few times/year)</SelectItem>
+                      <SelectItem value="regular">Regular (monthly)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+
+                <FormField label="Expected Transaction Value">
+                  <Select
+                    value={customerData.expectedTransactionValue}
+                    onValueChange={(value) => setCustomerData({ expectedTransactionValue: value as any })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select value range" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="<10k">Below ₱10,000</SelectItem>
+                      <SelectItem value="10k-50k">₱10,000 - ₱50,000</SelectItem>
+                      <SelectItem value="50k-100k">₱50,000 - ₱100,000</SelectItem>
+                      <SelectItem value=">100k">Above ₱100,000</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+              </div>
+
+              {/* Third Party Transaction */}
+              <div className="bg-muted border border-border rounded-lg p-4 space-y-3">
+                <p className="text-sm font-medium text-text-primary">Is someone else transacting on behalf of the customer?</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField label="Transacted By">
+                    <Input
+                      placeholder="Name of authorized person (if applicable)"
+                      value={customerData.transactedBy || ""}
+                      onChange={(e) => setCustomerData({ transactedBy: e.target.value })}
+                    />
+                  </FormField>
+                  <FormField label="Relationship to Customer">
+                    <Select
+                      value={customerData.relationshipToCustomer}
+                      onValueChange={(value) => setCustomerData({ relationshipToCustomer: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select relationship" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Spouse">Spouse</SelectItem>
+                        <SelectItem value="Child">Child</SelectItem>
+                        <SelectItem value="Parent">Parent</SelectItem>
+                        <SelectItem value="Sibling">Sibling</SelectItem>
+                        <SelectItem value="Attorney-in-fact">Attorney-in-fact</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                </div>
+              </div>
+
+              {/* Ready for Screening Indicator */}
+              <div className="bg-success/10 border border-success/30 rounded-lg p-4">
                 <div className="flex items-center gap-3">
                   <CheckCircle className="w-5 h-5 text-success" />
-                  <span className="text-success font-semibold">Watchlist Clear</span>
+                  <span className="text-success font-semibold">Ready for Screening</span>
                 </div>
               </div>
 
@@ -502,7 +759,7 @@ export default function NewLoan() {
                     setStep(2);
                   }}
                 >
-                  Continue to Item Details
+                  Continue to Screening
                   <ChevronRight className="w-5 h-5 ml-2" />
                 </Button>
               </div>
@@ -510,8 +767,27 @@ export default function NewLoan() {
           </Card>
         )}
 
-        {/* Step 2: Item Details */}
+        {/* Step 2: Customer Screening */}
         {step === 2 && (
+          <ScreeningStep
+            customerName={customerData.fullName || selectedCustomer?.full_name || "Customer"}
+            onBack={() => {
+              if (isNewCustomer) {
+                setStep(1);
+              } else {
+                setStep(1);
+                setSelectedCustomer(null);
+              }
+            }}
+            onContinue={(results) => {
+              setScreeningResults(results);
+              setStep(3);
+            }}
+          />
+        )}
+
+        {/* Step 3: Item Details */}
+        {step === 3 && (
           <Card>
             <CardHeader>
               <h2 className="text-xl font-heading font-semibold">Item Information</h2>
@@ -728,7 +1004,7 @@ export default function NewLoan() {
 
               {/* Navigation */}
               <div className="flex justify-between pt-4">
-                <Button variant="outline" onClick={() => setStep(1)}>
+                <Button variant="outline" onClick={() => setStep(isNewCustomer ? 2 : 1)}>
                   <ChevronLeft className="w-5 h-5 mr-2" />
                   Back
                 </Button>
@@ -741,7 +1017,7 @@ export default function NewLoan() {
                       return;
                     }
                     setItemData({ category: category as any });
-                    setStep(3);
+                    setStep(4);
                   }}
                 >
                   Continue to Loan Terms
@@ -752,8 +1028,8 @@ export default function NewLoan() {
           </Card>
         )}
 
-        {/* Step 3: Loan Terms */}
-        {step === 3 && (
+        {/* Step 4: Loan Terms */}
+        {step === 4 && (
           <Card>
             <CardHeader>
               <h2 className="text-xl font-heading font-semibold">Loan Terms</h2>
@@ -922,7 +1198,7 @@ export default function NewLoan() {
 
               {/* Navigation */}
               <div className="flex justify-between pt-4">
-                <Button variant="outline" onClick={() => setStep(2)}>
+                <Button variant="outline" onClick={() => setStep(3)}>
                   <ChevronLeft className="w-5 h-5 mr-2" />
                   Back
                 </Button>
@@ -934,7 +1210,7 @@ export default function NewLoan() {
                       });
                       return;
                     }
-                    setStep(4);
+                    setStep(5);
                   }}
                 >
                   Review & Generate Ticket
@@ -945,8 +1221,8 @@ export default function NewLoan() {
           </Card>
         )}
 
-        {/* Step 4: Review & Print */}
-        {step === 4 && (
+        {/* Step 5: Review & Print */}
+        {step === 5 && (
           <div className="space-y-6">
             {/* Success Header */}
             <div className="text-center space-y-4">
@@ -1116,7 +1392,7 @@ export default function NewLoan() {
 
             {/* Action Buttons */}
             <div className="flex gap-4 justify-center">
-              <Button variant="outline" size="lg" onClick={() => setStep(3)}>
+              <Button variant="outline" size="lg" onClick={() => setStep(4)}>
                 <Edit className="w-5 h-5 mr-2" />
                 Make Changes
               </Button>

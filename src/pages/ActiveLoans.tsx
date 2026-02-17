@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input.tsx";
 import { Card, CardContent } from "@/components/ui/card.tsx";
 import { AvatarCustom } from "@/components/ui/avatar-custom.tsx";
 import { LoanStatusBadge } from "@/components/ui/status-badge.tsx";
-import { getActiveLoans, deleteLoan, type Loan } from "@/services/loan-service";
+import { getActiveLoans, deleteLoan, type LoanRow } from "@/services/loan-service";
+import { exportLoansToCSV } from "@/lib/csv-export";
+import { ExportDialog } from "@/components/ui/export-dialog";
 import { toast } from "sonner";
 import {
   Select,
@@ -22,10 +24,10 @@ export default function ActiveLoans() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [loans, setLoans] = useState<Loan[]>([]);
+  const [loans, setLoans] = useState<LoanRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // Fetch loans from Supabase
   const fetchLoans = async (isRefresh = false) => {
@@ -49,14 +51,14 @@ export default function ActiveLoans() {
     fetchLoans(true);
   };
 
-  const handleDelete = async (loanId: string) => {
+  const handleDelete = async (loanKey: number) => {
     if (!confirm("Are you sure you want to delete this loan?")) {
       return;
     }
 
-    setDeletingId(loanId);
+    setDeletingId(loanKey);
     try {
-      await deleteLoan(loanId);
+      await deleteLoan(loanKey);
       toast.success("Loan deleted successfully");
       fetchLoans(true);
     } catch (error) {
@@ -76,7 +78,7 @@ export default function ActiveLoans() {
   // Filter loans
   const filteredLoans = loansWithDays.filter((loan) => {
     const matchesSearch =
-      loan.ticket_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      loan.loan_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (loan.customer?.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (loan.customer?.phone || '').includes(searchQuery);
 
@@ -110,10 +112,25 @@ export default function ActiveLoans() {
               <RefreshCw className={`w-5 h-5 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
               {isRefreshing ? 'Refreshing...' : 'Refresh'}
             </Button>
-            <Button variant="outline">
-              <Download className="w-5 h-5 mr-2" />
-              Export
-            </Button>
+            <ExportDialog
+              title="Export Loans"
+              description="Export loan data to CSV for external systems integration."
+              totalRecords={filteredLoans.length}
+              disabled={isLoading || filteredLoans.length === 0}
+              onExport={(dateRange) => {
+                // Add days_until_due to each loan for export
+                const loansForExport = filteredLoans.map((loan) => ({
+                  ...loan,
+                  days_until_due: loan.daysUntilDue,
+                }));
+                const count = exportLoansToCSV(loansForExport, dateRange);
+                if (count === 0) {
+                  toast.error("No loans found in selected date range");
+                } else {
+                  toast.success(`Exported ${count} loans to CSV`);
+                }
+              }}
+            />
             <Link to="/loans/new">
               <Button>
                 <Plus className="w-5 h-5 mr-2" />
@@ -173,7 +190,7 @@ export default function ActiveLoans() {
 
           {!isLoading && filteredLoans.map((loan) => (
             <div
-              key={loan.id}
+              key={loan.loan_key}
               className="bg-card border-l-4 border-l-accent rounded-lg p-6 shadow-card hover:shadow-card-hover transition-all duration-200 hover:border-l-primary"
             >
               <div className="flex items-start gap-4">
@@ -188,7 +205,7 @@ export default function ActiveLoans() {
                         {loan.customer?.full_name || 'Unknown Customer'}
                       </p>
                       <p className="text-text-tertiary text-sm">
-                        Ticket: <span className="font-mono">{loan.ticket_number}</span>
+                        Ticket: <span className="font-mono">{loan.loan_id}</span>
                       </p>
                     </div>
                     <LoanStatusBadge
@@ -225,7 +242,7 @@ export default function ActiveLoans() {
                     <div>
                       <p className="text-text-tertiary text-xs mb-1">Item</p>
                       <p className="font-semibold text-text-primary capitalize">
-                        {loan.item_category}
+                        {loan.item?.category || 'Unknown'}
                       </p>
                     </div>
                   </div>
@@ -258,13 +275,13 @@ export default function ActiveLoans() {
                     variant="outline"
                     size="sm"
                     className="text-error hover:bg-error/10"
-                    disabled={deletingId === loan.id}
+                    disabled={deletingId === loan.loan_key}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(loan.id!);
+                      handleDelete(loan.loan_key);
                     }}
                   >
-                    {deletingId === loan.id ? (
+                    {deletingId === loan.loan_key ? (
                       <Loader2 className="w-4 h-4 mr-1 animate-spin" />
                     ) : (
                       <Trash2 className="w-4 h-4 mr-1" />
