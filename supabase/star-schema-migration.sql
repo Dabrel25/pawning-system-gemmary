@@ -735,5 +735,16 @@ ALTER TABLE watchlist_unsc ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow read for watchlist_unsc" ON watchlist_unsc FOR SELECT USING (true);
 
 -- ============================================================
+-- STEP 8: IMPORT UNSC WATCHLIST DATA
+-- ============================================================
+-- 726 records from UN Security Council Consolidated Sanctions List
+--
+-- NOTE: For Supabase SQL Editor, use the combined file instead:
+--       supabase/full-migration.sql
+--
+-- This includes both the schema AND the watchlist data.
+-- ============================================================
+
+-- ============================================================
 -- END OF MIGRATION
 -- ============================================================
